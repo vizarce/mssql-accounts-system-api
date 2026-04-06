@@ -1,0 +1,346 @@
+#%RAML 1.0
+title: mssql-accounts-system-api
+description: |
+  System-layer API for managing Accounts stored in Microsoft SQL Server (MSSQL).
+
+  This API exposes full CRUD operations against the *accounts* table in the
+  configured MSSQL database:
+
+  | Table    | Status |
+  |----------|--------|
+  | accounts | exists |
+
+  It is designed to be consumed exclusively by the **Process Layer**
+  (mssql-accounts-process-api) and provides the data-access abstraction
+  required for future Salesforce integration.
+
+  ## Security
+  All endpoints are protected by **Client ID Enforcement** (default) and
+  support OAuth 2.0 Bearer tokens for process-layer consumers.
+  Individual endpoints advertise the supported schemes.
+
+  ## Pagination, Filtering & Sorting
+  Collection (list) endpoints support standard `page` / `pageSize`
+  query parameters, free-text search (`q`), field-level filters and
+  `sortBy` / `sortOrder` parameters — see the shared traits for details.
+
+  ## Error Handling
+  All error responses follow a uniform `ErrorResponse` envelope with an
+  optional `details` array for field-level validation errors.
+
+  ## Tracing
+  Supply an `X-Correlation-Id` (UUID v4) request header for end-to-end
+  traceability across all platform layers.
+
+version: v1
+baseUri: "https://{environment}.mssql-accounts-sys-api.example.com/api/{version}"
+baseUriParameters:
+  environment:
+    description: Deployment environment
+    type: string
+    enum:
+      - dev
+      - sit
+      - uat
+      - prod
+    example: dev
+
+protocols:
+  - HTTPS
+
+mediaType:
+  - application/json
+
+uses:
+  Lib: libraries/commons.raml
+
+securitySchemes:
+  clientIdEnforcement: !include securitySchemes/client-id-enforcement.raml
+  basicAuth:           !include securitySchemes/basic-auth.raml
+  oauth2:              !include securitySchemes/oauth2.raml
+
+securedBy:
+  - clientIdEnforcement
+
+traits:
+  pageable:      !include traits/pageable.raml
+  searchable:    !include traits/searchable.raml
+  sortable:      !include traits/sortable.raml
+  cacheable:     !include traits/cacheable.raml
+  errorHandling: !include traits/error-handling.raml
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /accounts  →  MSSQL table: accounts
+# ─────────────────────────────────────────────────────────────────────────────
+/accounts:
+  description: |
+    Manages account rows in the *accounts* MSSQL table.
+    Accounts represent organisations or companies and are the central entity
+    in the CRM data model.
+
+  # ── GET /accounts ──────────────────────────────────────────────────────────
+  get:
+    displayName: List Accounts
+    description: |
+      Returns a paginated, filterable and sortable list of accounts.
+      Supports free-text search across accountName, accountNumber and description.
+    is:
+      - pageable
+      - searchable
+      - sortable
+      - cacheable
+      - errorHandling
+    securedBy:
+      - clientIdEnforcement
+      - oauth2
+    queryParameters:
+      type:
+        type: string
+        description: Filter by account type
+        enum:
+          - Prospect
+          - Customer
+          - Partner
+          - Reseller
+          - Vendor
+          - Other
+        required: false
+        example: "Customer"
+      industry:
+        type: string
+        description: Filter by industry (exact match)
+        required: false
+        example: "Technology"
+      salesforceId:
+        type: string
+        description: Filter by Salesforce Account ID (exact match, 18-char)
+        required: false
+        maxLength: 18
+        example: "0015g00000XxYzZAA1"
+    headers:
+      X-Correlation-Id:
+        type: string
+        required: false
+        description: Client-supplied UUID for request tracing
+        example: "550e8400-e29b-41d4-a716-446655440000"
+    responses:
+      200:
+        description: Paginated list of accounts
+        headers:
+          X-Correlation-Id:
+            type: string
+            required: false
+        body:
+          application/json:
+            type: Lib.AccountsResponse
+            example: !include examples/accounts/accounts-response.json
+
+  # ── POST /accounts ─────────────────────────────────────────────────────────
+  post:
+    displayName: Create Account
+    description: Creates a new account row in the *accounts* table.
+    is:
+      - errorHandling
+    securedBy:
+      - clientIdEnforcement
+      - oauth2
+    headers:
+      X-Correlation-Id:
+        type: string
+        required: false
+        example: "550e8400-e29b-41d4-a716-446655440000"
+    body:
+      application/json:
+        type: Lib.AccountRequest
+        example: !include examples/accounts/account-request.json
+    responses:
+      201:
+        description: Account created successfully
+        headers:
+          Location:
+            description: URI of the newly created account
+            type: string
+            example: "/api/v1/accounts/42"
+          X-Correlation-Id:
+            type: string
+            required: false
+        body:
+          application/json:
+            type: Lib.Account
+            example: !include examples/accounts/account-response.json
+      409:
+        description: An account with the same accountNumber already exists
+        headers:
+          X-Correlation-Id:
+            type: string
+            required: false
+        body:
+          application/json:
+            type: Lib.ErrorResponse
+            example: !include examples/errors/error-409.json
+
+  # ── /accounts/{id} ─────────────────────────────────────────────────────────
+  /{id}:
+    description: Operations on a single account identified by its MSSQL IDENTITY integer
+    uriParameters:
+      id:
+        type: integer
+        description: MSSQL IDENTITY primary key of the account row
+        minimum: 1
+        example: 42
+
+    # ── GET /accounts/{id} ───────────────────────────────────────────────────
+    get:
+      displayName: Get Account by ID
+      description: Returns the account row identified by the given integer ID.
+      is:
+        - cacheable
+        - errorHandling
+      securedBy:
+        - clientIdEnforcement
+        - oauth2
+      headers:
+        X-Correlation-Id:
+          type: string
+          required: false
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        200:
+          description: Account found
+          headers:
+            X-Correlation-Id:
+              type: string
+              required: false
+          body:
+            application/json:
+              type: Lib.Account
+              example: !include examples/accounts/account-response.json
+
+    # ── PUT /accounts/{id} ───────────────────────────────────────────────────
+    put:
+      displayName: Replace Account
+      description: |
+        Fully replaces the account row. All required fields must be supplied.
+        Fields omitted from the request body will be cleared (set to NULL).
+      is:
+        - errorHandling
+      securedBy:
+        - clientIdEnforcement
+        - oauth2
+      headers:
+        X-Correlation-Id:
+          type: string
+          required: false
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      body:
+        application/json:
+          type: Lib.AccountRequest
+          example: !include examples/accounts/account-request.json
+      responses:
+        200:
+          description: Account replaced successfully
+          headers:
+            X-Correlation-Id:
+              type: string
+              required: false
+          body:
+            application/json:
+              type: Lib.Account
+              example: !include examples/accounts/account-response.json
+
+    # ── PATCH /accounts/{id} ─────────────────────────────────────────────────
+    patch:
+      displayName: Partial Update Account
+      description: |
+        Partially updates the account row.
+        Only fields present in the request body are updated; all other fields
+        retain their current values.
+      is:
+        - errorHandling
+      securedBy:
+        - clientIdEnforcement
+        - oauth2
+      headers:
+        X-Correlation-Id:
+          type: string
+          required: false
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      body:
+        application/json:
+          type: Lib.AccountUpdateRequest
+          example:
+            value: |
+              {
+                "industry": "Healthcare",
+                "numberOfEmployees": 300
+              }
+      responses:
+        200:
+          description: Account updated successfully
+          headers:
+            X-Correlation-Id:
+              type: string
+              required: false
+          body:
+            application/json:
+              type: Lib.Account
+              example: !include examples/accounts/account-response.json
+
+    # ── DELETE /accounts/{id} ────────────────────────────────────────────────
+    delete:
+      displayName: Delete Account
+      description: |
+        Permanently deletes the account row from the *accounts* table.
+      is:
+        - errorHandling
+      securedBy:
+        - clientIdEnforcement
+        - oauth2
+      headers:
+        X-Correlation-Id:
+          type: string
+          required: false
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        204:
+          description: Account deleted successfully — no content returned
+          headers:
+            X-Correlation-Id:
+              type: string
+              required: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /health  →  Liveness / readiness probe
+# ─────────────────────────────────────────────────────────────────────────────
+/health:
+  description: |
+    Liveness and readiness probe for the API.
+    Returns the current operational status of the service and its MSSQL
+    database connectivity.
+  get:
+    displayName: Health Check
+    description: |
+      Returns HTTP 200 when the service is healthy and connected to MSSQL.
+      Returns HTTP 503 when the service is unhealthy (e.g. MSSQL unreachable).
+    securedBy: []
+    responses:
+      200:
+        description: Service is healthy and MSSQL connection is available
+        body:
+          application/json:
+            example: |
+              {
+                "status": "UP",
+                "database": "UP",
+                "timestamp": "2024-01-15T10:30:00.000Z"
+              }
+      503:
+        description: Service is unhealthy — MSSQL connection unavailable
+        body:
+          application/json:
+            example: |
+              {
+                "status": "DOWN",
+                "database": "DOWN",
+                "timestamp": "2024-01-15T10:30:00.000Z"
+              }
