@@ -1,0 +1,19 @@
+# MuleSoft build artefacts
+target/
+.mule/
+
+# IDE
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Anypoint Studio metadata
+.api-gateway/
